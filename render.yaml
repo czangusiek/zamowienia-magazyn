@@ -2,8 +2,16 @@ services:
   - type: web
     name: zamowienia-magazyn
     runtime: python
-    pythonVersion: "3.9"  # Wymuś starszą wersję Pythona
+    pythonVersion: "3.9.16"  # Dokładna wersja kompatybilna
+    disk:
+      name: data_store
+      mountPath: /data  # Ścieżka do trwałego przechowywania
+      sizeGB: 1  # Darmowy 1GB dysk
     buildCommand: |
-      pip install --upgrade pip
+      python -m pip install --upgrade pip
+      pip install wheel
       pip install -r requirements.txt
     startCommand: gunicorn app:app
+    envVars:
+      - key: FLASK_ENV
+        value: production
