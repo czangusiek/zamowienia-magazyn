@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Wyniki obliczeń</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; overflow-x: auto; }
+        table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        .back-btn { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Wyniki obliczeń zapotrzebowania</h1>
+        {% for table in tables %}
+            {{ table|safe }}
+        {% endfor %}
+        <div class="back-btn">
+            <button onclick="window.location.href='/'">Powrót</button>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>System zamówień magazynowych</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .form-group { margin-bottom: 15px; }
+        .flash-message { padding: 10px; margin: 10px 0; border-radius: 4px; }
+        .success { background-color: #dff0d8; color: #3c763d; }
+        .error { background-color: #f2dede; color: #a94442; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>System obliczania zapotrzebowania magazynowego</h1>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="flash-message {{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <h2>1. Załaduj stan magazynowy</h2>
+        <form method="post" action="/upload_stock" enctype="multipart/form-data">
+            <div class="form-group">
+                <input type="file" name="file" accept=".csv" required>
+            </div>
+            <button type="submit">Wyślij plik stanu magazynowego</button>
+        </form>
+        
+        <h2>2. Załaduj dane sprzedaży</h2>
+        <form method="post" action="/upload_sales" enctype="multipart/form-data">
+            <div class="form-group">
+                <label>
+                    <input type="radio" name="sales_type" value="month" checked> Pełny miesiąc
+                    <input type="month" name="month" required>
+                </label>
+            </div>
+            <div class="form-group">
+                <label>
+                    <input type="radio" name="sales_type" value="30days"> Ostatnie 30 dni
+                </label>
+            </div>
+            <div class="form-group">
+                <input type="file" name="file" accept=".csv" required>
+            </div>
+            <button type="submit">Wyślij plik sprzedaży</button>
+        </form>
+        
+        <h2>3. Oblicz zapotrzebowanie</h2>
+        <form method="get" action="/calculate">
+            <button type="submit">Oblicz zapotrzebowanie</button>
+        </form>
+    </div>
+</body>
+</html>
