@@ -193,7 +193,7 @@ def oblicz():
                 'stan': towar.stan,
                 'dostawca': towar.dostawca or 'BRAK DOSTAWCY',
                 'zamowienie_30d': max(0, round(float(sprzedaz_30d) * 1.2 - towar.stan)),
-                'zamowienie_3m': max(0, round((float(sprzedaz_3m)/3 * 1.2 - towar.stan))),
+                'zamowienie_3m': max(0, round((float(sprzedaz_3m)/3 * 1.2 - towar.stan)),
                 'zamowienie_12m': max(0, round((float(sprzedaz_12m)/12 * 1.2 - towar.stan))
             })
         
