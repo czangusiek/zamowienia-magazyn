@@ -138,6 +138,7 @@ def dodaj_sprzedaz(df, typ_okresu):
 
 @app.route('/', methods=['GET', 'POST'])
 def glowna():
+    print("DEBUG: Wersja aplikacji - 2024-04-02")
     if request.method == 'POST':
         plik = request.files.get('plik')
         if not plik or plik.filename == '':
