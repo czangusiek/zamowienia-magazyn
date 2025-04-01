@@ -170,33 +170,39 @@ def oblicz():
     try:
         wyniki = []
         for towar in Towar.query.all():
-            sprzedaz_30d = db.session.query(db.func.sum(Sprzedaz.ilosc)).filter(
-                Sprzedaz.symbol == towar.symbol,
-                Sprzedaz.typ_okresu == '30dni'
-            ).scalar() or 0
+            # Zapytania SQL
+            sprzedaz_30d = (db.session.query(db.func.sum(Sprzedaz.ilosc))
+                          .filter(Sprzedaz.symbol == towar.symbol,
+                                 Sprzedaz.typ_okresu == '30dni')
+                          .scalar() or 0)
             
-            sprzedaz_3m = db.session.query(db.func.sum(Sprzedaz.ilosc)).filter(
-                Sprzedaz.symbol == towar.symbol,
-                Sprzedaz.typ_okresu == 'miesiac',
-                Sprzedaz.data >= datetime.utcnow() - timedelta(days=90)
-            ).scalar() or 0
+            sprzedaz_3m = (db.session.query(db.func.sum(Sprzedaz.ilosc))
+                         .filter(Sprzedaz.symbol == towar.symbol,
+                                Sprzedaz.typ_okresu == 'miesiac',
+                                Sprzedaz.data >= datetime.utcnow() - timedelta(days=90))
+                         .scalar() or 0)
             
-            sprzedaz_12m = db.session.query(db.func.sum(Sprzedaz.ilosc)).filter(
-                Sprzedaz.symbol == towar.symbol,
-                Sprzedaz.typ_okresu == 'miesiac'
-            ).scalar() or 0
-            
+            sprzedaz_12m = (db.session.query(db.func.sum(Sprzedaz.ilosc))
+                          .filter(Sprzedaz.symbol == towar.symbol,
+                                 Sprzedaz.typ_okresu == 'miesiac')
+                          .scalar() or 0)
+
+            # Obliczenia - TERAZ NA 100% POPRAWNIE
+            zamowienie_30d = max(0, round(sprzedaz_30d * 1.2 - towar.stan))
+            zamowienie_3m = max(0, round((sprzedaz_3m / 3) * 1.2 - towar.stan))
+            zamowienie_12m = max(0, round((sprzedaz_12m / 12) * 1.2 - towar.stan))
+
             wyniki.append({
                 'rodzaj': towar.rodzaj,
                 'symbol': towar.symbol,
                 'nazwa': towar.nazwa,
                 'stan': towar.stan,
                 'dostawca': towar.dostawca or 'BRAK DOSTAWCY',
-                'zamowienie_30d': max(0, round(float(sprzedaz_30d) * 1.2 - towar.stan)),
-                'zamowienie_3m': max(0, round((float(sprzedaz_3m)/3 * 1.2 - towar.stan)),
-                'zamowienie_12m': max(0, round((float(sprzedaz_12m)/12 * 1.2 - towar.stan))
+                'zamowienie_30d': zamowienie_30d,
+                'zamowienie_3m': zamowienie_3m,
+                'zamowienie_12m': zamowienie_12m
             })
-        # Sortowanie wyników
+
         posortowane = sorted(wyniki, key=lambda x: (x['dostawca'] == 'BRAK DOSTAWCY', x['symbol']))
         return render_template('results.html', wyniki=posortowane)
     
