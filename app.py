@@ -4,170 +4,187 @@ from flask import Flask, render_template, request, flash, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
 from werkzeug.utils import secure_filename
+import logging
 
+# Konfiguracja aplikacji
 app = Flask(__name__)
-app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key')
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////data/database.db'
+app.secret_key = os.getenv('SECRET_KEY', 'tajny-klucz-produkcyjny-zmien-to')
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////data/magazyn.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
+# Konfiguracja logowania
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Modele danych
-class Stock(db.Model):
+class Towar(db.Model):
+    """Model przechowujący stan magazynowy"""
+    __tablename__ = 'towary'
     id = db.Column(db.Integer, primary_key=True)
     symbol = db.Column(db.String(50), unique=True, nullable=False)
-    name = db.Column(db.String(100))
-    current_stock = db.Column(db.Integer, default=0)
-    supplier = db.Column(db.String(100))
-    supplier_code = db.Column(db.String(50))
+    nazwa = db.Column(db.String(100))
+    stan = db.Column(db.Integer, default=0)
+    dostawca = db.Column(db.String(100))
+    symbol_dostawcy = db.Column(db.String(50))
 
-class Sales(db.Model):
+class Sprzedaz(db.Model):
+    """Model przechowujący dane sprzedaży"""
+    __tablename__ = 'sprzedaz'
     id = db.Column(db.Integer, primary_key=True)
     symbol = db.Column(db.String(50), nullable=False)
-    quantity = db.Column(db.Integer)
-    record_date = db.Column(db.Date, default=datetime.utcnow)
-    period_type = db.Column(db.String(20))  # '30days' lub 'full_month'
+    ilosc = db.Column(db.Integer)
+    data = db.Column(db.Date, default=datetime.utcnow)
+    typ_okresu = db.Column(db.String(20))  # '30dni' lub 'miesiac'
 
 # Inicjalizacja bazy
 with app.app_context():
     db.create_all()
 
-def validate_numeric(value, default=0):
-    """Konwertuje wartość na liczbę całkowitą z domyślną wartością"""
+# Narzędzia pomocnicze
+def konwertuj_na_liczbe(wartosc, domyslna=0):
+    """Bezpieczna konwersja wartości na liczbę całkowitą"""
     try:
-        return int(float(str(value).replace(',', '.')))
+        return int(float(str(wartosc).replace(',', '.')))
     except (ValueError, TypeError):
-        return default
+        return domyslna
 
-def validate_csv(file_stream, required_columns):
-    """Walidacja struktury pliku CSV"""
+def waliduj_csv(plik, wymagane_kolumny):
+    """Sprawdza poprawność struktury pliku CSV"""
     try:
-        df = pd.read_csv(file_stream)
-        missing = [col for col in required_columns if col not in df.columns]
-        if missing:
-            raise ValueError(f"Brak wymaganych kolumn: {', '.join(missing)}")
+        df = pd.read_csv(plik)
+        brakujace = [kol for kol in wymagane_kolumny if kol not in df.columns]
+        if brakujace:
+            raise ValueError(f"Brak wymaganych kolumn: {', '.join(brakujace)}")
         return df
     except Exception as e:
-        raise ValueError(f"Nieprawidłowy plik CSV: {str(e)}")
+        raise ValueError(f"Błąd pliku CSV: {str(e)}")
 
-def update_stock(df):
-    """Aktualizacja stanu magazynowego z walidacją danych"""
-    errors = []
-    for _, row in df.iterrows():
-        try:
-            symbol = str(row['Symbol']).strip()
-            stock = validate_numeric(row.get('Stan', 0))
-            
-            item = Stock.query.filter_by(symbol=symbol).first()
-            if item:
-                item.current_stock = stock
-                item.supplier = str(row.get('Podstawowy dostawca', item.supplier or '')).strip()
-            else:
-                db.session.add(Stock(
-                    symbol=symbol,
-                    name=str(row.get('Nazwa', '')).strip(),
-                    current_stock=stock,
-                    supplier=str(row.get('Podstawowy dostawca', '')).strip(),
-                    supplier_code=str(row.get('Symbol u dostawcy', '')).strip()
-                ))
-        except Exception as e:
-            errors.append(f"Wiersz {_+1}: {str(e)}")
-            continue
-    
-    db.session.commit()
-    if errors:
-        flash("Część danych nie została załadowana. Szczegóły: " + " | ".join(errors))
-
-def update_sales(df, period_type):
-    """Aktualizacja danych sprzedaży z walidacją"""
-    errors = []
-    for _, row in df.iterrows():
-        try:
-            symbol = str(row['Symbol']).strip()
-            quantity = validate_numeric(row.get('Ilość', 0))
-            
-            db.session.add(Sales(
-                symbol=symbol,
-                quantity=quantity,
-                period_type=period_type
-            ))
-        except Exception as e:
-            errors.append(f"Wiersz {_+1}: {str(e)}")
-            continue
-    
-    db.session.commit()
-    if errors:
-        flash("Część sprzedaży nie została załadowana. Szczegóły: " + " | ".join(errors))
-
+# Widoki aplikacji
 @app.route('/', methods=['GET', 'POST'])
-def index():
+def glowna():
     if request.method == 'POST':
-        file = request.files.get('file')
-        if not file or file.filename == '':
+        plik = request.files.get('plik')
+        if not plik or plik.filename == '':
             flash('Nie wybrano pliku')
-            return redirect(url_for('index'))
-        
+            return redirect(url_for('glowna'))
+
         try:
-            file.stream.seek(0)
-            if 'Stan' in pd.read_csv(file.stream).columns:
-                file.stream.seek(0)
-                df = validate_csv(file.stream, ['Symbol', 'Stan'])
-                update_stock(df)
+            # Sprawdź typ pliku
+            plik.stream.seek(0)
+            if 'stan' in pd.read_csv(plik.stream).columns:
+                plik.stream.seek(0)
+                dane = waliduj_csv(plik.stream, ['symbol', 'stan'])
+                aktualizuj_stan(dane)
                 flash('Stan magazynowy zaktualizowany')
             else:
-                file.stream.seek(0)
-                df = validate_csv(file.stream, ['Symbol', 'Ilość'])
-                period_type = '30days' if request.form.get('sales_type') == '30days' else 'full_month'
-                update_sales(df, period_type)
+                plik.stream.seek(0)
+                dane = waliduj_csv(plik.stream, ['symbol', 'ilosc'])
+                typ_okresu = '30dni' if request.form.get('typ_okresu') == '30dni' else 'miesiac'
+                dodaj_sprzedaz(dane, typ_okresu)
                 flash('Dane sprzedaży zaktualizowane')
         except Exception as e:
+            logger.error(f"Błąd przetwarzania pliku: {str(e)}")
             flash(f'Błąd: {str(e)}')
-        
-        return redirect(url_for('index'))
-    
-    return render_template('upload.html')
 
-@app.route('/calculate')
-def calculate():
+        return redirect(url_for('glowna'))
+    
+    return render_template('laduj.html')
+
+@app.route('/oblicz')
+def oblicz():
     try:
-        results = []
-        for item in Stock.query.all():
+        wyniki = []
+        for towar in Towar.query.all():
             # Pobierz dane sprzedaży
-            sales_30d = db.session.query(db.func.sum(Sales.quantity)).filter(
-                Sales.symbol == item.symbol,
-                Sales.period_type == '30days'
+            sprzedaz_30d = db.session.query(db.func.sum(Sprzedaz.ilosc)).filter(
+                Sprzedaz.symbol == towar.symbol,
+                Sprzedaz.typ_okresu == '30dni'
             ).scalar() or 0
             
-            sales_3m = db.session.query(db.func.sum(Sales.quantity)).filter(
-                Sales.symbol == item.symbol,
-                Sales.period_type == 'full_month',
-                Sales.record_date >= datetime.utcnow() - timedelta(days=90)
+            sprzedaz_3m = db.session.query(db.func.sum(Sprzedaz.ilosc)).filter(
+                Sprzedaz.symbol == towar.symbol,
+                Sprzedaz.typ_okresu == 'miesiac',
+                Sprzedaz.data >= datetime.utcnow() - timedelta(days=90)
             ).scalar() or 0
             
-            sales_12m = db.session.query(db.func.sum(Sales.quantity)).filter(
-                Sales.symbol == item.symbol,
-                Sales.period_type == 'full_month'
+            sprzedaz_12m = db.session.query(db.func.sum(Sprzedaz.ilosc)).filter(
+                Sprzedaz.symbol == towar.symbol,
+                Sprzedaz.typ_okresu == 'miesiac'
             ).scalar() or 0
             
-            # Obliczenia z zabezpieczeniami
-            current_stock = validate_numeric(item.current_stock)
-            results.append({
-                'symbol': item.symbol,
-                'name': item.name or '',
-                'current_stock': current_stock,
-                'supplier': item.supplier or 'BRAK DOSTAWCY',
-                'order_30d': max(0, round(float(sales_30d) * 1.2 - current_stock)),
-                'order_3m': max(0, round((float(sales_3m)/3 * 1.2 - current_stock)),
-                'order_12m': max(0, round((float(sales_12m)/12 * 1.2 - current_stock))
+            # Oblicz zapotrzebowanie
+            aktualny_stan = konwertuj_na_liczbe(towar.stan)
+            wyniki.append({
+                'symbol': towar.symbol,
+                'nazwa': towar.nazwa or '',
+                'stan': aktualny_stan,
+                'dostawca': towar.dostawca or 'BRAK DOSTAWCY',
+                'zamowienie_30d': max(0, round(float(sprzedaz_30d) * 1.2 - aktualny_stan)),
+                'zamowienie_3m': max(0, round((float(sprzedaz_3m)/3 * 1.2 - aktualny_stan))),
+                'zamowienie_12m': max(0, round((float(sprzedaz_12m)/12 * 1.2 - aktualny_stan))
             })
         
-        # Sortowanie wyników
-        results_sorted = sorted(results, key=lambda x: (x['supplier'] == 'BRAK DOSTAWCY', x['symbol']))
-        return render_template('results.html', results=results_sorted)
+        # Sortuj wyniki
+        posortowane = sorted(wyniki, key=lambda x: (x['dostawca'] == 'BRAK DOSTAWCY', x['symbol']))
+        return render_template('wyniki.html', wyniki=posortowane)
     
     except Exception as e:
-        flash(f'Błąd obliczeń: {str(e)}')
-        return redirect(url_for('index'))
+        logger.error(f"Błąd obliczeń: {str(e)}")
+        flash('Wystąpił błąd podczas obliczeń')
+        return redirect(url_for('glowna'))
 
+# Funkcje pomocnicze
+def aktualizuj_stan(df):
+    """Aktualizuje stan magazynowy w bazie danych"""
+    bledy = []
+    for _, wiersz in df.iterrows():
+        try:
+            symbol = str(wiersz['symbol']).strip()
+            stan = konwertuj_na_liczbe(wiersz.get('stan', 0))
+            
+            towar = Towar.query.filter_by(symbol=symbol).first()
+            if towar:
+                towar.stan = stan
+                towar.dostawca = str(wiersz.get('dostawca', towar.dostawca or '')).strip()
+            else:
+                db.session.add(Towar(
+                    symbol=symbol,
+                    nazwa=str(wiersz.get('nazwa', '')).strip(),
+                    stan=stan,
+                    dostawca=str(wiersz.get('dostawca', '')).strip(),
+                    symbol_dostawcy=str(wiersz.get('symbol_dostawcy', '')).strip()
+                ))
+        except Exception as e:
+            bledy.append(f"Wiersz {_+1}: {str(e)}")
+            continue
+    
+    db.session.commit()
+    if bledy:
+        flash("Niektóre dane nie zostały załadowane. Problem z wierszami: " + ", ".join(bledy))
+
+def dodaj_sprzedaz(df, typ_okresu):
+    """Dodaje rekordy sprzedaży do bazy"""
+    bledy = []
+    for _, wiersz in df.iterrows():
+        try:
+            symbol = str(wiersz['symbol']).strip()
+            ilosc = konwertuj_na_liczbe(wiersz.get('ilosc', 0))
+            
+            db.session.add(Sprzedaz(
+                symbol=symbol,
+                ilosc=ilosc,
+                typ_okresu=typ_okresu
+            ))
+        except Exception as e:
+            bledy.append(f"Wiersz {_+1}: {str(e)}")
+            continue
+    
+    db.session.commit()
+    if bledy:
+        flash("Niektóre rekordy sprzedaży nie zostały zapisane. Problem z wierszami: " + ", ".join(bledy))
+
+# Uruchomienie aplikacji
 if __name__ == '__main__':
     os.makedirs('/data', exist_ok=True)
     app.run(host='0.0.0.0', port=5000)

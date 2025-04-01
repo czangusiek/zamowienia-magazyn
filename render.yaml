@@ -4,7 +4,7 @@ services:
     runtime: python
     pythonVersion: "3.9.16"
     disk:
-      name: data_store
+      name: magazyn-dane
       mountPath: /data
       sizeGB: 1
     buildCommand: |
