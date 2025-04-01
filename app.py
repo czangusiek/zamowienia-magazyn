@@ -9,6 +9,7 @@ import logging
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'tajny-klucz-produkcyjny-zmien-to')
 
+# Konfiguracja bazy danych
 BASE_DIR = Path(__file__).parent
 DB_DIR = BASE_DIR / "instance"
 DB_DIR.mkdir(exist_ok=True)
@@ -18,9 +19,12 @@ app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DATABASE_PATH}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
-logging.basicConfig(level=logging.INFO)
+
+# Konfiguracja logowania
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+# Modele danych
 class Towar(db.Model):
     __tablename__ = 'towary'
     id = db.Column(db.Integer, primary_key=True)
@@ -43,6 +47,7 @@ class Sprzedaz(db.Model):
     data = db.Column(db.Date, default=datetime.utcnow)
     typ_okresu = db.Column(db.String(20))
 
+# Funkcje pomocnicze
 def init_db():
     try:
         with app.app_context():
@@ -59,33 +64,43 @@ def konwertuj_na_liczbe(wartosc, domyslna=0):
         return domyslna
 
 def waliduj_csv(plik, typ_pliku):
+    """Ulepszona walidacja plików CSV"""
     try:
         df = pd.read_csv(plik)
-        
+        df.columns = df.columns.str.strip()  # Usuwa spacje z nazw kolumn
+        logger.debug(f"Załadowane kolumny: {df.columns.tolist()}")
+
         if typ_pliku == 'stan':
             required = ['Symbol', 'Stan']
-            df = df.rename(columns={
+            column_map = {
                 'Rodzaj': 'rodzaj',
                 'Nazwa': 'nazwa',
                 'Podstawowy dostawca': 'dostawca',
                 'Symbol u dostawcy': 'symbol_dostawcy'
-            })
+            }
         else:  # sprzedaż
-            required = ['Symbol', 'Ilość']
-            df = df.rename(columns={
+            required = ['Symbol']
+            # Szukaj kolumny z ilością (obsługa różnych wariantów)
+            ilosc_col = next((col for col in df.columns if 'ilość' in col.lower() or 'ilosc' in col.lower()), None)
+            if not ilosc_col:
+                raise ValueError("Nie znaleziono kolumny z ilością (oczekiwano: 'Ilość', 'Ilosc', 'ilość' lub 'ilosc')")
+            
+            required.append(ilosc_col)
+            column_map = {
                 'Rodzaj': 'rodzaj',
                 'Nazwa': 'nazwa',
                 'Grupa': 'grupa',
-                'Ilość': 'ilosc',
+                ilosc_col: 'ilosc',
                 'J.M.': 'jm'
-            })
-        
+            }
+
         brakujace = [kol for kol in required if kol not in df.columns]
         if brakujace:
-            raise ValueError(f"Brak wymaganych kolumn: {', '.join(brakujace)}")
-            
-        return df
+            raise ValueError(f"Brak wymaganych kolumn: {', '.join(brakujace)}. Dostępne kolumny: {', '.join(df.columns)}")
+
+        return df.rename(columns=column_map)
     except Exception as e:
+        logger.error(f"Błąd walidacji CSV: {str(e)}")
         raise ValueError(f"Błąd pliku CSV: {str(e)}")
 
 def aktualizuj_stan(df):
@@ -111,6 +126,7 @@ def aktualizuj_stan(df):
                 db.session.add(Towar(**dane))
         except Exception as e:
             bledy.append(f"Wiersz {_+1}: {str(e)}")
+            logger.error(f"Błąd w wierszu {_+1}: {e}\nDane: {wiersz.to_dict()}")
     
     db.session.commit()
     if bledy:
@@ -120,6 +136,8 @@ def dodaj_sprzedaz(df, typ_okresu):
     bledy = []
     for _, wiersz in df.iterrows():
         try:
+            logger.debug(f"Przetwarzanie wiersza: {wiersz.to_dict()}")
+            
             db.session.add(Sprzedaz(
                 rodzaj=str(wiersz.get('rodzaj', '')).strip(),
                 symbol=str(wiersz['Symbol']).strip(),
@@ -131,11 +149,13 @@ def dodaj_sprzedaz(df, typ_okresu):
             ))
         except Exception as e:
             bledy.append(f"Wiersz {_+1}: {str(e)}")
+            logger.error(f"Błąd w wierszu {_+1}: {e}\nDane: {wiersz.to_dict()}")
     
     db.session.commit()
     if bledy:
         flash("Błędy w wierszach: " + ", ".join(bledy))
 
+# Widoki aplikacji
 @app.route('/', methods=['GET', 'POST'])
 def glowna():
     if request.method == 'POST':
@@ -146,7 +166,7 @@ def glowna():
 
         try:
             plik.stream.seek(0)
-            if 'Stan' in pd.read_csv(plik.stream).columns:
+            if 'Stan' in pd.read_csv(plik.stream, nrows=1).columns:
                 plik.stream.seek(0)
                 dane = waliduj_csv(plik.stream, 'stan')
                 aktualizuj_stan(dane)
@@ -154,6 +174,7 @@ def glowna():
             else:
                 plik.stream.seek(0)
                 dane = waliduj_csv(plik.stream, 'sprzedaz')
+                logger.debug(f"Przykładowe dane sprzedaży: {dane.head().to_dict()}")
                 typ_okresu = '30dni' if request.form.get('typ_okresu') == '30dni' else 'miesiac'
                 dodaj_sprzedaz(dane, typ_okresu)
                 flash('Dane sprzedaży zaktualizowane')
@@ -170,39 +191,33 @@ def oblicz():
     try:
         wyniki = []
         for towar in Towar.query.all():
-            # Zapytania SQL
-            sprzedaz_30d = (db.session.query(db.func.sum(Sprzedaz.ilosc))
-                          .filter(Sprzedaz.symbol == towar.symbol,
-                                 Sprzedaz.typ_okresu == '30dni')
-                          .scalar() or 0)
+            sprzedaz_30d = db.session.query(db.func.sum(Sprzedaz.ilosc)).filter(
+                Sprzedaz.symbol == towar.symbol,
+                Sprzedaz.typ_okresu == '30dni'
+            ).scalar() or 0
             
-            sprzedaz_3m = (db.session.query(db.func.sum(Sprzedaz.ilosc))
-                         .filter(Sprzedaz.symbol == towar.symbol,
-                                Sprzedaz.typ_okresu == 'miesiac',
-                                Sprzedaz.data >= datetime.utcnow() - timedelta(days=90))
-                         .scalar() or 0)
+            sprzedaz_3m = db.session.query(db.func.sum(Sprzedaz.ilosc)).filter(
+                Sprzedaz.symbol == towar.symbol,
+                Sprzedaz.typ_okresu == 'miesiac',
+                Sprzedaz.data >= datetime.utcnow() - timedelta(days=90)
+            ).scalar() or 0
             
-            sprzedaz_12m = (db.session.query(db.func.sum(Sprzedaz.ilosc))
-                          .filter(Sprzedaz.symbol == towar.symbol,
-                                 Sprzedaz.typ_okresu == 'miesiac')
-                          .scalar() or 0)
-
-            # Obliczenia - TERAZ NA 100% POPRAWNIE
-            zamowienie_30d = max(0, round(sprzedaz_30d * 1.2 - towar.stan))
-            zamowienie_3m = max(0, round((sprzedaz_3m / 3) * 1.2 - towar.stan))
-            zamowienie_12m = max(0, round((sprzedaz_12m / 12) * 1.2 - towar.stan))
-
+            sprzedaz_12m = db.session.query(db.func.sum(Sprzedaz.ilosc)).filter(
+                Sprzedaz.symbol == towar.symbol,
+                Sprzedaz.typ_okresu == 'miesiac'
+            ).scalar() or 0
+            
             wyniki.append({
                 'rodzaj': towar.rodzaj,
                 'symbol': towar.symbol,
                 'nazwa': towar.nazwa,
                 'stan': towar.stan,
                 'dostawca': towar.dostawca or 'BRAK DOSTAWCY',
-                'zamowienie_30d': zamowienie_30d,
-                'zamowienie_3m': zamowienie_3m,
-                'zamowienie_12m': zamowienie_12m
+                'zamowienie_30d': max(0, round(float(sprzedaz_30d) * 1.2 - towar.stan)),
+                'zamowienie_3m': max(0, round(float(sprzedaz_3m)/3 * 1.2 - towar.stan)),
+                'zamowienie_12m': max(0, round(float(sprzedaz_12m)/12 * 1.2 - towar.stan))
             })
-
+        
         posortowane = sorted(wyniki, key=lambda x: (x['dostawca'] == 'BRAK DOSTAWCY', x['symbol']))
         return render_template('results.html', wyniki=posortowane)
     
