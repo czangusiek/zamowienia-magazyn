@@ -196,7 +196,7 @@ def oblicz():
                 'zamowienie_3m': max(0, round((float(sprzedaz_3m)/3 * 1.2 - towar.stan)),
                 'zamowienie_12m': max(0, round((float(sprzedaz_12m)/12 * 1.2 - towar.stan))
             })
-        
+        # Sortowanie wyników
         posortowane = sorted(wyniki, key=lambda x: (x['dostawca'] == 'BRAK DOSTAWCY', x['symbol']))
         return render_template('results.html', wyniki=posortowane)
     
