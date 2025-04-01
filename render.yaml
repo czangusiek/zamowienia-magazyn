@@ -2,16 +2,16 @@ services:
   - type: web
     name: zamowienia-magazyn
     runtime: python
-    pythonVersion: "3.9.16"
+    pythonVersion: "3.11.11"
     buildCommand: |
       python -m pip install --upgrade pip
-      pip install wheel
       pip install -r requirements.txt
     startCommand: |
       python -c "from app import init_db; init_db()" &&
-      gunicorn app:app
+      gunicorn app:app --config gunicorn.conf.py
     envVars:
       - key: FLASK_ENV
         value: production
       - key: SECRET_KEY
         generateValue: true
+    plan: standard  # Zmiana z free na standard
