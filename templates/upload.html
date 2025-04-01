@@ -23,35 +23,37 @@
             {% endif %}
         {% endwith %}
         
+        <!-- ZMIANA: action="/" zamiast action="/upload_stock" -->
         <h2>1. Załaduj stan magazynowy</h2>
-        <form method="post" action="/upload_stock" enctype="multipart/form-data">
+        <form method="post" action="/" enctype="multipart/form-data">
             <div class="form-group">
-                <input type="file" name="file" accept=".csv" required>
+                <!-- ZMIANA: name="plik" zamiast name="file" -->
+                <input type="file" name="plik" accept=".csv" required>
             </div>
             <button type="submit">Wyślij plik stanu magazynowego</button>
         </form>
         
+        <!-- ZMIANA: action="/" zamiast action="/upload_sales" -->
         <h2>2. Załaduj dane sprzedaży</h2>
-        <form method="post" action="/upload_sales" enctype="multipart/form-data">
+        <form method="post" action="/" enctype="multipart/form-data">
             <div class="form-group">
+                <!-- ZMIANA: name="typ_okresu" zamiast name="sales_type" -->
                 <label>
-                    <input type="radio" name="sales_type" value="month" checked> Pełny miesiąc
-                    <input type="month" name="month" required>
+                    <input type="radio" name="typ_okresu" value="miesiac" checked> Pełny miesiąc
+                </label>
+                <label>
+                    <input type="radio" name="typ_okresu" value="30dni"> Ostatnie 30 dni
                 </label>
             </div>
             <div class="form-group">
-                <label>
-                    <input type="radio" name="sales_type" value="30days"> Ostatnie 30 dni
-                </label>
-            </div>
-            <div class="form-group">
-                <input type="file" name="file" accept=".csv" required>
+                <!-- ZMIANA: name="plik" zamiast name="file" -->
+                <input type="file" name="plik" accept=".csv" required>
             </div>
             <button type="submit">Wyślij plik sprzedaży</button>
         </form>
         
         <h2>3. Oblicz zapotrzebowanie</h2>
-        <form method="get" action="/calculate">
+        <form method="get" action="/oblicz">
             <button type="submit">Oblicz zapotrzebowanie</button>
         </form>
     </div>
