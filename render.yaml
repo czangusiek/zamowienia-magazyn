@@ -3,15 +3,13 @@ services:
     name: zamowienia-magazyn
     runtime: python
     pythonVersion: "3.9.16"
-    disk:
-      name: magazyn-dane
-      mountPath: /data
-      sizeGB: 1
     buildCommand: |
       python -m pip install --upgrade pip
       pip install wheel
       pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    startCommand: |
+      python -c "from app import init_db; init_db()" &&
+      gunicorn app:app
     envVars:
       - key: FLASK_ENV
         value: production

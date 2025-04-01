@@ -3,13 +3,23 @@ import pandas as pd
 from flask import Flask, render_template, request, flash, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
+from pathlib import Path
 import logging
 
 # Konfiguracja aplikacji
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'tajny-klucz-produkcyjny-zmien-to')
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////data/magazyn.db'
+
+# Konfiguracja ścieżki do bazy danych
+BASE_DIR = Path(__file__).parent
+DB_DIR = BASE_DIR / "instance"
+DB_DIR.mkdir(exist_ok=True)  # Tworzy katalog jeśli nie istnieje
+DATABASE_PATH = DB_DIR / "magazyn.db"
+
+app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DATABASE_PATH}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Inicjalizacja rozszerzeń
 db = SQLAlchemy(app)
 
 # Konfiguracja logowania
@@ -36,11 +46,17 @@ class Sprzedaz(db.Model):
     data = db.Column(db.Date, default=datetime.utcnow)
     typ_okresu = db.Column(db.String(20))  # '30dni' lub 'miesiac'
 
-# Inicjalizacja bazy
-with app.app_context():
-    db.create_all()
+# Funkcje pomocnicze
+def init_db():
+    """Inicjalizacja bazy danych"""
+    try:
+        with app.app_context():
+            db.create_all()
+        logger.info("Baza danych zainicjalizowana pomyślnie")
+    except Exception as e:
+        logger.error(f"Błąd inicjalizacji bazy: {str(e)}")
+        raise
 
-# Narzędzia pomocnicze
 def konwertuj_na_liczbe(wartosc, domyslna=0):
     """Bezpieczna konwersja wartości na liczbę całkowitą"""
     try:
@@ -58,55 +74,6 @@ def waliduj_csv(plik, wymagane_kolumny):
         return df
     except Exception as e:
         raise ValueError(f"Błąd pliku CSV: {str(e)}")
-
-def aktualizuj_stan(df):
-    """Aktualizuje stan magazynowy w bazie danych"""
-    bledy = []
-    for _, wiersz in df.iterrows():
-        try:
-            symbol = str(wiersz['symbol']).strip()
-            stan = konwertuj_na_liczbe(wiersz.get('stan', 0))
-            
-            towar = Towar.query.filter_by(symbol=symbol).first()
-            if towar:
-                towar.stan = stan
-                towar.dostawca = str(wiersz.get('dostawca', towar.dostawca or '')).strip()
-            else:
-                db.session.add(Towar(
-                    symbol=symbol,
-                    nazwa=str(wiersz.get('nazwa', '')).strip(),
-                    stan=stan,
-                    dostawca=str(wiersz.get('dostawca', '')).strip(),
-                    symbol_dostawcy=str(wiersz.get('symbol_dostawcy', '')).strip()
-                ))
-        except Exception as e:
-            bledy.append(f"Wiersz {_+1}: {str(e)}")
-            continue
-    
-    db.session.commit()
-    if bledy:
-        flash("Niektóre dane nie zostały załadowane. Problem z wierszami: " + ", ".join(bledy))
-
-def dodaj_sprzedaz(df, typ_okresu):
-    """Dodaje rekordy sprzedaży do bazy"""
-    bledy = []
-    for _, wiersz in df.iterrows():
-        try:
-            symbol = str(wiersz['symbol']).strip()
-            ilosc = konwertuj_na_liczbe(wiersz.get('ilosc', 0))
-            
-            db.session.add(Sprzedaz(
-                symbol=symbol,
-                ilosc=ilosc,
-                typ_okresu=typ_okresu
-            ))
-        except Exception as e:
-            bledy.append(f"Wiersz {_+1}: {str(e)}")
-            continue
-    
-    db.session.commit()
-    if bledy:
-        flash("Niektóre rekordy sprzedaży nie zostały zapisane. Problem z wierszami: " + ", ".join(bledy))
 
 # Widoki aplikacji
 @app.route('/', methods=['GET', 'POST'])
@@ -170,7 +137,7 @@ def oblicz():
                 'dostawca': towar.dostawca or 'BRAK DOSTAWCY',
                 'zamowienie_30d': max(0, round(float(sprzedaz_30d) * 1.2 - aktualny_stan)),
                 'zamowienie_3m': max(0, round((float(sprzedaz_3m)/3 * 1.2 - aktualny_stan))),
-                'zamowienie_12m': max(0, round((float(sprzedaz_12m)/12 * 1.2 - aktualny_stan)))
+                'zamowienie_12m': max(0, round((float(sprzedaz_12m)/12 * 1.2 - aktualny_stan))
             })
         
         # Sortuj wyniki
@@ -182,7 +149,57 @@ def oblicz():
         flash('Wystąpił błąd podczas obliczeń')
         return redirect(url_for('glowna'))
 
-# Uruchomienie aplikacji
+def aktualizuj_stan(df):
+    """Aktualizuje stan magazynowy w bazie danych"""
+    bledy = []
+    for _, wiersz in df.iterrows():
+        try:
+            symbol = str(wiersz['symbol']).strip()
+            stan = konwertuj_na_liczbe(wiersz.get('stan', 0))
+            
+            towar = Towar.query.filter_by(symbol=symbol).first()
+            if towar:
+                towar.stan = stan
+                towar.dostawca = str(wiersz.get('dostawca', towar.dostawca or '')).strip()
+            else:
+                db.session.add(Towar(
+                    symbol=symbol,
+                    nazwa=str(wiersz.get('nazwa', '')).strip(),
+                    stan=stan,
+                    dostawca=str(wiersz.get('dostawca', '')).strip(),
+                    symbol_dostawcy=str(wiersz.get('symbol_dostawcy', '')).strip()
+                ))
+        except Exception as e:
+            bledy.append(f"Wiersz {_+1}: {str(e)}")
+            continue
+    
+    db.session.commit()
+    if bledy:
+        flash("Niektóre dane nie zostały załadowane. Problem z wierszami: " + ", ".join(bledy))
+
+def dodaj_sprzedaz(df, typ_okresu):
+    """Dodaje rekordy sprzedaży do bazy"""
+    bledy = []
+    for _, wiersz in df.iterrows():
+        try:
+            symbol = str(wiersz['symbol']).strip()
+            ilosc = konwertuj_na_liczbe(wiersz.get('ilosc', 0))
+            
+            db.session.add(Sprzedaz(
+                symbol=symbol,
+                ilosc=ilosc,
+                typ_okresu=typ_okresu
+            ))
+        except Exception as e:
+            bledy.append(f"Wiersz {_+1}: {str(e)}")
+            continue
+    
+    db.session.commit()
+    if bledy:
+        flash("Niektóre rekordy sprzedaży nie zostały zapisane. Problem z wierszami: " + ", ".join(bledy))
+
+# Inicjalizacja bazy przy starcie
+init_db()
+
 if __name__ == '__main__':
-    os.makedirs('/data', exist_ok=True)
     app.run(host='0.0.0.0', port=5000)
