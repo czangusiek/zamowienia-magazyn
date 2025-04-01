@@ -7,17 +7,44 @@
         .container { max-width: 1200px; margin: 0 auto; overflow-x: auto; }
         table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
         th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
+        th { background-color: #f2f2f2; position: sticky; top: 0; }
         tr:nth-child(even) { background-color: #f9f9f9; }
+        .warning { background-color: #fff3cd; }
         .back-btn { margin-top: 20px; }
+        .nowrap { white-space: nowrap; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Wyniki obliczeń zapotrzebowania</h1>
-        {% for table in tables %}
-            {{ table|safe }}
-        {% endfor %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Rodzaj</th>
+                    <th>Symbol</th>
+                    <th>Nazwa</th>
+                    <th>Stan</th>
+                    <th>Dostawca</th>
+                    <th class="nowrap">Zamówienie (30 dni)</th>
+                    <th class="nowrap">Zamówienie (3 miesiące)</th>
+                    <th class="nowrap">Zamówienie (12 miesięcy)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for towar in wyniki %}
+                <tr {% if towar.dostawca == 'BRAK DOSTAWCY' %}class="warning"{% endif %}>
+                    <td>{{ towar.rodzaj }}</td>
+                    <td>{{ towar.symbol }}</td>
+                    <td>{{ towar.nazwa }}</td>
+                    <td>{{ towar.stan }}</td>
+                    <td>{{ towar.dostawca }}</td>
+                    <td>{{ towar.zamowienie_30d }}</td>
+                    <td>{{ towar.zamowienie_3m }}</td>
+                    <td>{{ towar.zamowienie_12m }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
         <div class="back-btn">
             <button onclick="window.location.href='/'">Powrót</button>
         </div>

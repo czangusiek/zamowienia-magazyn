@@ -6,31 +6,25 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import logging
 
-# Konfiguracja aplikacji
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'tajny-klucz-produkcyjny-zmien-to')
 
-# Konfiguracja ścieżki do bazy danych
 BASE_DIR = Path(__file__).parent
 DB_DIR = BASE_DIR / "instance"
-DB_DIR.mkdir(exist_ok=True)  # Tworzy katalog jeśli nie istnieje
+DB_DIR.mkdir(exist_ok=True)
 DATABASE_PATH = DB_DIR / "magazyn.db"
 
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DATABASE_PATH}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Inicjalizacja rozszerzeń
 db = SQLAlchemy(app)
-
-# Konfiguracja logowania
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Modele danych
 class Towar(db.Model):
-    """Model przechowujący stan magazynowy"""
     __tablename__ = 'towary'
     id = db.Column(db.Integer, primary_key=True)
+    rodzaj = db.Column(db.String(50))
     symbol = db.Column(db.String(50), unique=True, nullable=False)
     nazwa = db.Column(db.String(100))
     stan = db.Column(db.Integer, default=0)
@@ -38,17 +32,18 @@ class Towar(db.Model):
     symbol_dostawcy = db.Column(db.String(50))
 
 class Sprzedaz(db.Model):
-    """Model przechowujący dane sprzedaży"""
     __tablename__ = 'sprzedaz'
     id = db.Column(db.Integer, primary_key=True)
+    rodzaj = db.Column(db.String(50))
     symbol = db.Column(db.String(50), nullable=False)
+    nazwa = db.Column(db.String(100))
+    grupa = db.Column(db.String(50))
     ilosc = db.Column(db.Integer)
+    jm = db.Column(db.String(20))
     data = db.Column(db.Date, default=datetime.utcnow)
-    typ_okresu = db.Column(db.String(20))  # '30dni' lub 'miesiac'
+    typ_okresu = db.Column(db.String(20))
 
-# Funkcje pomocnicze
 def init_db():
-    """Inicjalizacja bazy danych"""
     try:
         with app.app_context():
             db.create_all()
@@ -58,73 +53,89 @@ def init_db():
         raise
 
 def konwertuj_na_liczbe(wartosc, domyslna=0):
-    """Bezpieczna konwersja wartości na liczbę całkowitą"""
     try:
         return int(float(str(wartosc).replace(',', '.')))
     except (ValueError, TypeError):
         return domyslna
 
-def waliduj_csv(plik, wymagane_kolumny):
-    """Sprawdza poprawność struktury pliku CSV"""
+def waliduj_csv(plik, typ_pliku):
     try:
         df = pd.read_csv(plik)
-        brakujace = [kol for kol in wymagane_kolumny if kol not in df.columns]
+        
+        if typ_pliku == 'stan':
+            required = ['Symbol', 'Stan']
+            df = df.rename(columns={
+                'Rodzaj': 'rodzaj',
+                'Nazwa': 'nazwa',
+                'Podstawowy dostawca': 'dostawca',
+                'Symbol u dostawcy': 'symbol_dostawcy'
+            })
+        else:  # sprzedaż
+            required = ['Symbol', 'Ilość']
+            df = df.rename(columns={
+                'Rodzaj': 'rodzaj',
+                'Nazwa': 'nazwa',
+                'Grupa': 'grupa',
+                'Ilość': 'ilosc',
+                'J.M.': 'jm'
+            })
+        
+        brakujace = [kol for kol in required if kol not in df.columns]
         if brakujace:
             raise ValueError(f"Brak wymaganych kolumn: {', '.join(brakujace)}")
+            
         return df
     except Exception as e:
         raise ValueError(f"Błąd pliku CSV: {str(e)}")
 
 def aktualizuj_stan(df):
-    """Aktualizuje stan magazynowy w bazie danych"""
     bledy = []
     for _, wiersz in df.iterrows():
         try:
-            symbol = str(wiersz['symbol']).strip()
-            stan = konwertuj_na_liczbe(wiersz.get('stan', 0))
-            
+            symbol = str(wiersz['Symbol']).strip()
             towar = Towar.query.filter_by(symbol=symbol).first()
+            
+            dane = {
+                'rodzaj': str(wiersz.get('rodzaj', '')).strip(),
+                'nazwa': str(wiersz.get('nazwa', '')).strip(),
+                'stan': konwertuj_na_liczbe(wiersz['Stan']),
+                'dostawca': str(wiersz.get('dostawca', '')).strip(),
+                'symbol_dostawcy': str(wiersz.get('symbol_dostawcy', '')).strip()
+            }
+            
             if towar:
-                towar.stan = stan
-                towar.dostawca = str(wiersz.get('dostawca', towar.dostawca or '')).strip()
+                for key, value in dane.items():
+                    setattr(towar, key, value)
             else:
-                db.session.add(Towar(
-                    symbol=symbol,
-                    nazwa=str(wiersz.get('nazwa', '')).strip(),
-                    stan=stan,
-                    dostawca=str(wiersz.get('dostawca', '')).strip(),
-                    symbol_dostawcy=str(wiersz.get('symbol_dostawcy', '')).strip()
-                ))
+                dane['symbol'] = symbol
+                db.session.add(Towar(**dane))
         except Exception as e:
             bledy.append(f"Wiersz {_+1}: {str(e)}")
-            continue
     
     db.session.commit()
     if bledy:
-        flash("Niektóre dane nie zostały załadowane. Problem z wierszami: " + ", ".join(bledy))
+        flash("Błędy w wierszach: " + ", ".join(bledy))
 
 def dodaj_sprzedaz(df, typ_okresu):
-    """Dodaje rekordy sprzedaży do bazy"""
     bledy = []
     for _, wiersz in df.iterrows():
         try:
-            symbol = str(wiersz['symbol']).strip()
-            ilosc = konwertuj_na_liczbe(wiersz.get('ilosc', 0))
-            
             db.session.add(Sprzedaz(
-                symbol=symbol,
-                ilosc=ilosc,
+                rodzaj=str(wiersz.get('rodzaj', '')).strip(),
+                symbol=str(wiersz['Symbol']).strip(),
+                nazwa=str(wiersz.get('nazwa', '')).strip(),
+                grupa=str(wiersz.get('grupa', '')).strip(),
+                ilosc=konwertuj_na_liczbe(wiersz['ilosc']),
+                jm=str(wiersz.get('jm', '')).strip(),
                 typ_okresu=typ_okresu
             ))
         except Exception as e:
             bledy.append(f"Wiersz {_+1}: {str(e)}")
-            continue
     
     db.session.commit()
     if bledy:
-        flash("Niektóre rekordy sprzedaży nie zostały zapisane. Problem z wierszami: " + ", ".join(bledy))
+        flash("Błędy w wierszach: " + ", ".join(bledy))
 
-# Widoki aplikacji
 @app.route('/', methods=['GET', 'POST'])
 def glowna():
     if request.method == 'POST':
@@ -134,16 +145,15 @@ def glowna():
             return redirect(url_for('glowna'))
 
         try:
-            # Sprawdź typ pliku
             plik.stream.seek(0)
-            if 'stan' in pd.read_csv(plik.stream).columns:
+            if 'Stan' in pd.read_csv(plik.stream).columns:
                 plik.stream.seek(0)
-                dane = waliduj_csv(plik.stream, ['symbol', 'stan'])
+                dane = waliduj_csv(plik.stream, 'stan')
                 aktualizuj_stan(dane)
                 flash('Stan magazynowy zaktualizowany')
             else:
                 plik.stream.seek(0)
-                dane = waliduj_csv(plik.stream, ['symbol', 'ilosc'])
+                dane = waliduj_csv(plik.stream, 'sprzedaz')
                 typ_okresu = '30dni' if request.form.get('typ_okresu') == '30dni' else 'miesiac'
                 dodaj_sprzedaz(dane, typ_okresu)
                 flash('Dane sprzedaży zaktualizowane')
@@ -160,7 +170,6 @@ def oblicz():
     try:
         wyniki = []
         for towar in Towar.query.all():
-            # Pobierz dane sprzedaży
             sprzedaz_30d = db.session.query(db.func.sum(Sprzedaz.ilosc)).filter(
                 Sprzedaz.symbol == towar.symbol,
                 Sprzedaz.typ_okresu == '30dni'
@@ -177,19 +186,17 @@ def oblicz():
                 Sprzedaz.typ_okresu == 'miesiac'
             ).scalar() or 0
             
-            # Oblicz zapotrzebowanie
-            aktualny_stan = konwertuj_na_liczbe(towar.stan)
             wyniki.append({
+                'rodzaj': towar.rodzaj,
                 'symbol': towar.symbol,
-                'nazwa': towar.nazwa or '',
-                'stan': aktualny_stan,
+                'nazwa': towar.nazwa,
+                'stan': towar.stan,
                 'dostawca': towar.dostawca or 'BRAK DOSTAWCY',
-                'zamowienie_30d': max(0, round(float(sprzedaz_30d) * 1.2 - aktualny_stan)),
-                'zamowienie_3m': max(0, round((float(sprzedaz_3m)/3 * 1.2 - aktualny_stan))),
-                'zamowienie_12m': max(0, round((float(sprzedaz_12m)/12 * 1.2 - aktualny_stan)))
+                'zamowienie_30d': max(0, round(float(sprzedaz_30d) * 1.2 - towar.stan)),
+                'zamowienie_3m': max(0, round((float(sprzedaz_3m)/3 * 1.2 - towar.stan)),
+                'zamowienie_12m': max(0, round((float(sprzedaz_12m)/12 * 1.2 - towar.stan))
             })
         
-        # Sortuj wyniki
         posortowane = sorted(wyniki, key=lambda x: (x['dostawca'] == 'BRAK DOSTAWCY', x['symbol']))
         return render_template('results.html', wyniki=posortowane)
     
@@ -198,7 +205,6 @@ def oblicz():
         flash('Wystąpił błąd podczas obliczeń')
         return redirect(url_for('glowna'))
 
-# Inicjalizacja bazy przy starcie
 init_db()
 
 if __name__ == '__main__':
