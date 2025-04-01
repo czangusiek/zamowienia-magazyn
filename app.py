@@ -153,7 +153,7 @@ def glowna():
 
         return redirect(url_for('glowna'))
     
-    return render_template('laduj.html')
+    return render_template('upload.html')
 
 @app.route('/oblicz')
 def oblicz():
@@ -191,7 +191,7 @@ def oblicz():
         
         # Sortuj wyniki
         posortowane = sorted(wyniki, key=lambda x: (x['dostawca'] == 'BRAK DOSTAWCY', x['symbol']))
-        return render_template('wyniki.html', wyniki=posortowane)
+        return render_template('results.html', wyniki=posortowane)
     
     except Exception as e:
         logger.error(f"Błąd obliczeń: {str(e)}")
