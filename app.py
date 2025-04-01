@@ -75,6 +75,55 @@ def waliduj_csv(plik, wymagane_kolumny):
     except Exception as e:
         raise ValueError(f"Błąd pliku CSV: {str(e)}")
 
+def aktualizuj_stan(df):
+    """Aktualizuje stan magazynowy w bazie danych"""
+    bledy = []
+    for _, wiersz in df.iterrows():
+        try:
+            symbol = str(wiersz['symbol']).strip()
+            stan = konwertuj_na_liczbe(wiersz.get('stan', 0))
+            
+            towar = Towar.query.filter_by(symbol=symbol).first()
+            if towar:
+                towar.stan = stan
+                towar.dostawca = str(wiersz.get('dostawca', towar.dostawca or '')).strip()
+            else:
+                db.session.add(Towar(
+                    symbol=symbol,
+                    nazwa=str(wiersz.get('nazwa', '')).strip(),
+                    stan=stan,
+                    dostawca=str(wiersz.get('dostawca', '')).strip(),
+                    symbol_dostawcy=str(wiersz.get('symbol_dostawcy', '')).strip()
+                ))
+        except Exception as e:
+            bledy.append(f"Wiersz {_+1}: {str(e)}")
+            continue
+    
+    db.session.commit()
+    if bledy:
+        flash("Niektóre dane nie zostały załadowane. Problem z wierszami: " + ", ".join(bledy))
+
+def dodaj_sprzedaz(df, typ_okresu):
+    """Dodaje rekordy sprzedaży do bazy"""
+    bledy = []
+    for _, wiersz in df.iterrows():
+        try:
+            symbol = str(wiersz['symbol']).strip()
+            ilosc = konwertuj_na_liczbe(wiersz.get('ilosc', 0))
+            
+            db.session.add(Sprzedaz(
+                symbol=symbol,
+                ilosc=ilosc,
+                typ_okresu=typ_okresu
+            ))
+        except Exception as e:
+            bledy.append(f"Wiersz {_+1}: {str(e)}")
+            continue
+    
+    db.session.commit()
+    if bledy:
+        flash("Niektóre rekordy sprzedaży nie zostały zapisane. Problem z wierszami: " + ", ".join(bledy))
+
 # Widoki aplikacji
 @app.route('/', methods=['GET', 'POST'])
 def glowna():
@@ -137,7 +186,7 @@ def oblicz():
                 'dostawca': towar.dostawca or 'BRAK DOSTAWCY',
                 'zamowienie_30d': max(0, round(float(sprzedaz_30d) * 1.2 - aktualny_stan)),
                 'zamowienie_3m': max(0, round((float(sprzedaz_3m)/3 * 1.2 - aktualny_stan))),
-                'zamowienie_12m': max(0, round((float(sprzedaz_12m)/12 * 1.2 - aktualny_stan))
+                'zamowienie_12m': max(0, round((float(sprzedaz_12m)/12 * 1.2 - aktualny_stan)))
             })
         
         # Sortuj wyniki
@@ -148,55 +197,6 @@ def oblicz():
         logger.error(f"Błąd obliczeń: {str(e)}")
         flash('Wystąpił błąd podczas obliczeń')
         return redirect(url_for('glowna'))
-
-def aktualizuj_stan(df):
-    """Aktualizuje stan magazynowy w bazie danych"""
-    bledy = []
-    for _, wiersz in df.iterrows():
-        try:
-            symbol = str(wiersz['symbol']).strip()
-            stan = konwertuj_na_liczbe(wiersz.get('stan', 0))
-            
-            towar = Towar.query.filter_by(symbol=symbol).first()
-            if towar:
-                towar.stan = stan
-                towar.dostawca = str(wiersz.get('dostawca', towar.dostawca or '')).strip()
-            else:
-                db.session.add(Towar(
-                    symbol=symbol,
-                    nazwa=str(wiersz.get('nazwa', '')).strip(),
-                    stan=stan,
-                    dostawca=str(wiersz.get('dostawca', '')).strip(),
-                    symbol_dostawcy=str(wiersz.get('symbol_dostawcy', '')).strip()
-                ))
-        except Exception as e:
-            bledy.append(f"Wiersz {_+1}: {str(e)}")
-            continue
-    
-    db.session.commit()
-    if bledy:
-        flash("Niektóre dane nie zostały załadowane. Problem z wierszami: " + ", ".join(bledy))
-
-def dodaj_sprzedaz(df, typ_okresu):
-    """Dodaje rekordy sprzedaży do bazy"""
-    bledy = []
-    for _, wiersz in df.iterrows():
-        try:
-            symbol = str(wiersz['symbol']).strip()
-            ilosc = konwertuj_na_liczbe(wiersz.get('ilosc', 0))
-            
-            db.session.add(Sprzedaz(
-                symbol=symbol,
-                ilosc=ilosc,
-                typ_okresu=typ_okresu
-            ))
-        except Exception as e:
-            bledy.append(f"Wiersz {_+1}: {str(e)}")
-            continue
-    
-    db.session.commit()
-    if bledy:
-        flash("Niektóre rekordy sprzedaży nie zostały zapisane. Problem z wierszami: " + ", ".join(bledy))
 
 # Inicjalizacja bazy przy starcie
 init_db()
