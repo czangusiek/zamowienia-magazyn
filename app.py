@@ -10,8 +10,8 @@ import logging
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'tajny-klucz-produkcyjny-zmien-to')
 
-# Optymalizacja połączenia z bazą danych
-db_path = Path(__file__).parent / "instance" / "magazyn.db"
+# Optymalizacja połączenia z bazą danych - zmieniona ścieżka dla Render
+db_path = os.path.join(os.getcwd(), "magazyn.db")
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
@@ -71,10 +71,10 @@ def konwertuj_na_liczbe(wartosc, domyslna=0):
         return domyslna
 
 def waliduj_csv(plik, typ_pliku):
-    """Ulepszona walidacja plików CSV z obsługą różnych formatów"""
+    """Ulepszona walidacja plików CSV z obsługą polskich znaków"""
     try:
         # Wczytaj tylko pierwszy wiersz aby sprawdzić nagłówki
-        df = pd.read_csv(plik, nrows=1)
+        df = pd.read_csv(plik, nrows=1, encoding='utf-8')
         plik.seek(0)  # Rewind pliku
         
         df.columns = df.columns.str.strip().str.lower()
@@ -83,7 +83,7 @@ def waliduj_csv(plik, typ_pliku):
         # Słownik mapowania kolumn
         mapowanie = {
             'stan': ['stan', 'ilosc', 'quantity'],
-            'sprzedaz': ['ilosc', 'quantity', 'sztuki']
+            'sprzedaz': ['ilość', 'ilosc', 'quantity', 'sztuki']
         }
 
         if typ_pliku == 'stan':
@@ -96,8 +96,10 @@ def waliduj_csv(plik, typ_pliku):
             })
         else:
             required = ['symbol', 'ilosc']
-            # Znajdź kolumnę z ilością
-            ilosc_col = next((col for col in df.columns if any(m in col for m in mapowanie['sprzedaz'])), None)
+            # Znajdź kolumnę z ilością (uwzględniając polskie znaki)
+            ilosc_col = next((col for col in df.columns 
+                           if any(m in col.lower().replace('ść', 'sc') 
+                                 for m in mapowanie['sprzedaz'])), None)
             if not ilosc_col:
                 raise ValueError(f"Nie znaleziono kolumny z ilością. Dostępne kolumny: {df.columns.tolist()}")
             
@@ -114,7 +116,7 @@ def waliduj_csv(plik, typ_pliku):
             raise ValueError(f"Brak wymaganych kolumn: {', '.join(brakujace)}. Dostępne kolumny: {', '.join(df.columns)}")
 
         # Wczytaj cały plik z poprawnymi nagłówkami
-        df = pd.read_csv(plik)
+        df = pd.read_csv(plik, encoding='utf-8')
         return df.rename(columns=str.strip).rename(columns=str.lower)
 
     except Exception as e:
@@ -157,7 +159,7 @@ def aktualizuj_stan(df):
         bledy.append(f"Błąd bazy danych: {str(e)}")
     
     if bledy:
-        flash("Niektóre dane nie zostały załadowane. Problem z wierszami: " + ", ".join(bledy[:5]))  # Pokazuj max 5 błędów
+        flash("Niektóre dane nie zostały załadowane. Problem z wierszami: " + ", ".join(bledy[:5]))
 
 def dodaj_sprzedaz(df, typ_okresu):
     """Optymalizowane dodawanie sprzedaży"""
@@ -202,7 +204,7 @@ def glowna():
 
         try:
             # Sprawdź typ pliku
-            df_sample = pd.read_csv(plik.stream, nrows=1)
+            df_sample = pd.read_csv(plik.stream, nrows=1, encoding='utf-8')
             plik.stream.seek(0)
             
             if 'stan' in [col.lower() for col in df_sample.columns]:
