@@ -62,7 +62,7 @@ def init_db(force=False):
                 os.makedirs(os.path.dirname(db_path), exist_ok=True)
                 db.create_all()
                 logger.info(f"Baza utworzona w: {db_path}")
-                logger.info(f"Tabele: {db.engine.table_names()}")
+                logger.info(f"Tabele: {[t.name for t in db.metadata.sorted_tables]}")
             else:
                 logger.info(f"Baza już istnieje w: {db_path}")
     except Exception as e:
@@ -107,7 +107,7 @@ def waliduj_csv(plik, typ_pliku):
             # Znajdź kolumnę z ilością (uwzględniając polskie znaki)
             ilosc_col = next((col for col in df.columns 
                            if any(m in col.lower().replace('ść', 'sc') 
-                                 for m in mapowanie['sprzedaz']), None)
+                                 for m in mapowanie['sprzedaz'])), None)
             if not ilosc_col:
                 raise ValueError(f"Nie znaleziono kolumny z ilością. Dostępne kolumny: {df.columns.tolist()}")
             
@@ -216,7 +216,7 @@ def init_db_route():
 @app.route('/', methods=['GET', 'POST'])
 def glowna():
     logger.info(f"Ścieżka do bazy: {db_path}")
-    logger.info(f"Tabele w bazie: {db.engine.table_names()}")
+    logger.info(f"Tabele w bazie: {[t.name for t in db.metadata.sorted_tables]}")
 
     if request.method == 'POST':
         plik = request.files.get('plik')
